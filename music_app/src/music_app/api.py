@@ -1,27 +1,27 @@
 import bson
 from bson.errors import InvalidId
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 from marshmallow import ValidationError
 from pymongo.errors import OperationFailure
 from werkzeug.exceptions import NotFound
 
-from models import Rating, Song
+from music_app.models import Rating, Song, MongoItemType
 
 app = Flask(__name__)
 
 
 @app.errorhandler(ValidationError)
-def handle_schema_validation_error(e):
+def handle_schema_validation_error(e: ValidationError) -> Response:
     response = jsonify(dict(errors=e.messages))
     response.status_code = 400
     return response
 
 
 @app.route('/songs', methods=['GET'])
-def songs():
+def songs() -> Response:
     try:
         limit = int(request.args['limit'])  # TODO: deserialise with marshmallow
-    except:
+    except KeyError:
         limit = None
     try:
         start_from = int(request.args['start_from'])  # TODO: deserialise with marshmallow
@@ -37,9 +37,9 @@ def songs():
 
 
 @app.route('/songs/avg/difficulty', methods=['GET'])
-def songs_avg_difficulty():
+def songs_avg_difficulty() -> Response:
     id = 'all songs'
-    pipelines = []
+    pipelines: list[dict] = []  # type: ignore[type-arg]  # Generic `dict` due to Mongo queries being Mongo queries...
     try:
         level = request.args['level']
         pipelines.append({
@@ -60,22 +60,21 @@ def songs_avg_difficulty():
     try:
         result = next(Song.collection().aggregate(pipeline=pipelines))
     except StopIteration:
-        result = dict(
-            _id='Database is empty',
-            average_difficulty=None,
-        )
+        result = {
+            '_id': 'Database is empty',
+            'average_difficulty': None,
+        }
     return jsonify(result)
 
 
 @app.route('/songs/search', methods=['GET'])
-def songs_search():
+def songs_search() -> Response:
     try:
         message = request.args['message']
     except KeyError:
         message = ''
 
     try:
-        # TODO: if/when partial matches are required and/or performance becomes an issue, refactor to use elasticsearch
         result = list(Song.collection().aggregate(
             pipeline=[{
                 '$match': {
@@ -94,23 +93,24 @@ def songs_search():
 
 
 @app.route('/songs/rating', methods=['POST'])
-def songs_new_rating():
-    validated_data = Rating.Schemas.Post().load(request.json)
+def songs_new_rating() -> Response:
+    validated_data = Rating.Schemas.Post().load(request.json)  # type: ignore[arg-type]  # lib typings are *very* loose
     Rating.insert(validated_data)  # `validated_data` gets updated to include `_id`
     return jsonify(Rating.Schemas.Get().dump(validated_data))
 
 
 @app.route('/songs/avg/rating/<string:song_id>', methods=['GET'])  # TODO: convert id to ObjectId automatically
-def songs_avg_rating(song_id):
+def songs_avg_rating(song_id: str) -> Response:
     try:
-        song_id = bson.ObjectId(song_id)
+        # TODO: Changing the variable type is a non-issue once the above TODO is resolved.
+        song_id = bson.ObjectId(song_id)  # type: ignore[assignment]
     except InvalidId:
         raise NotFound  # TODO: should return this also when valid ObjectId, but song with the id doesn't exist
     try:
         result = next(Rating.collection().aggregate(
             pipeline=[
                 {'$match': {
-                    'song_id': bson.ObjectId(song_id)},
+                    'song_id': song_id},
                 },
                 {
                     '$group': {
@@ -137,24 +137,24 @@ def songs_avg_rating(song_id):
 ######################################################################################################################
 
 @app.route('/add_random_song', methods=['GET'])
-def add_random_song():
+def add_random_song() -> Response:
     import random
     from faker import Faker
 
     fake = Faker()
-    insert_data = dict(
-        artist=' '.join(fake.words(nb=4)),
-        title=' '.join(fake.words(nb=4)),
-        difficulty=random.uniform(1, 20),
-        level=random.randint(1, 15),
-        released=str(fake.date()),
-    )
+    insert_data: MongoItemType = {
+        'artist': ' '.join(fake.words(nb=4)),
+        'title': ' '.join(fake.words(nb=4)),
+        'difficulty': random.uniform(1, 20),
+        'level': random.randint(1, 15),
+        'released': str(fake.date()),
+    }
     Song.insert(insert_data)
     return jsonify(Song.Schemas.Get().dump(insert_data))
 
 
 @app.route('/add_random_rating', methods=['GET'])
-def add_random_rating():
+def add_random_rating() -> Response:
     import random
     insert_data = dict(
         song_id=random.choice(list(Song.get_all()))['_id'],
@@ -165,11 +165,11 @@ def add_random_rating():
 
 
 @app.route('/recreate_database', methods=['GET'])
-def reset_db():
-    from tools.setup_db import recreate_database
+def reset_db() -> tuple[str, int]:
+    from music_app.tools.setup_db import recreate_database
     recreate_database()
     return ('', 204)
 
 
-if __name__ == '__main__':
+def start() -> None:
     app.run(debug=True, host='0.0.0.0')

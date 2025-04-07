@@ -6,16 +6,16 @@ import mongomock
 import pytest
 from faker import Faker
 
-from ..src import database
-from ..src.models import Rating, Song
-from ..src.tools.setup_db import recreate_database, songs_from_json
+from music_app.database import HOST, PORT
+from music_app.models import Rating, Song
+from music_app.tools.setup_db import recreate_database, songs_from_json
 
 fake = Faker()
 
-songs = songs_from_json()
+songs = list(songs_from_json())
 
 
-@mongomock.patch((f'mongodb://{database.HOST}:{database.PORT}/'))
+@mongomock.patch((f'mongodb://{HOST}:{PORT}/'))
 class TestSongsAPI:
     def test_get_songs(self, client):
         recreate_database()
@@ -55,7 +55,7 @@ class TestSongsAPI:
     def test_get_songs_avg_diff(self, client):
         recreate_database()
 
-        r = client.get(f'/songs/avg/difficulty')
+        r = client.get('/songs/avg/difficulty')
         assert r.status_code == 200
         assert r.json['average_difficulty'] == statistics.mean([x['difficulty'] for x in Song.get_all()])
 

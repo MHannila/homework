@@ -1,4 +1,0 @@
-faker
-flask
-marshmallow
-pymongo
